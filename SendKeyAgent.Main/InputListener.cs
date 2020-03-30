@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -17,7 +18,7 @@ namespace SendKeyAgent.App
         private TcpListener tcpListener;
         private int connectionId;
         private readonly ILogger<InputListener> logger;
-        private readonly ApplicationSettings applicationSettings;
+
         private readonly IInputSimulator inputSimulator;
         private readonly ICommandParser commandParser;
 
@@ -26,11 +27,10 @@ namespace SendKeyAgent.App
         private const int EndOfTransmission = 4;
         private const int Quit = 17;
 
-        public InputListener(ILogger<InputListener> logger, ApplicationSettings applicationSettings,
+        public InputListener(ILogger<InputListener> logger,
             IInputSimulator inputSimulator, ICommandParser commandParser)
         {
             this.logger = logger;
-            this.applicationSettings = applicationSettings;
             this.inputSimulator = inputSimulator;
             this.commandParser = commandParser;
         }
@@ -133,8 +133,11 @@ namespace SendKeyAgent.App
         private void FlushTextBuffer(IEnumerable<char> buffer)
         {
             var input = string.Join(string.Empty, buffer);
-
-            
+            ICommand command;
+            if ((command = commandParser
+                .ParseCommand(CultureInfo.InvariantCulture, input, out var processedInput)) != null
+                    && !string.IsNullOrEmpty(processedInput))
+                input = processedInput;
 
             inputSimulator.Keyboard
                 .TextEntry(input);

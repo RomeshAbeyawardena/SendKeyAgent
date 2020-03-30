@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.26124.0
 MinimumVisualStudioVersion = 15.0.26124.0
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SendKeyAgent.App", "SendKeyAgent.App\SendKeyAgent.App.csproj", "{50D1484C-D85C-4E9E-8E6B-FA5C0ADCA823}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SendKeyAgent.Main", "SendKeyAgent.Main\SendKeyAgent.App.csproj", "{50D1484C-D85C-4E9E-8E6B-FA5C0ADCA823}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

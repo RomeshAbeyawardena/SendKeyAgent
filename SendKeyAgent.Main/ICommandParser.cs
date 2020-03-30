@@ -10,6 +10,6 @@ namespace SendKeyAgent.App
     public interface ICommandParser
     {
         ICommand ParseCommand(CultureInfo cultureInfo, string commandText, 
-            out string completeCommandText, ICommand startingNode);
+            out string completeCommandText, ICommand startingNode = default);
     }
 }

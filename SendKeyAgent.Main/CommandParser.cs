@@ -22,14 +22,17 @@ namespace SendKeyAgent.App
         {
             completeCommandText = string.Empty;
 
-            var commandTextParameters = commandText.ToLower(cultureInfo).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var commandTextParameters = commandText
+                .Replace("\n", string.Empty)
+                .ToLower(cultureInfo)
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries);
             
             if(startingNode == null)
             {
                 startingNode = applicationSettings.Commands
                     .SingleOrDefault(cmd => cmd.Name == commandTextParameters.FirstOrDefault());
-
-                if(startingNode == null)
+                
+                 if(startingNode == null)
                     return default;
 
                 commandTextParameters = commandTextParameters
@@ -41,11 +44,14 @@ namespace SendKeyAgent.App
             completeCommandText = currentNode.CommandText;
             foreach(var parameter in commandTextParameters)
             {
+                if(currentNode.Children == null
+                    || !currentNode.Children.Any())
+                    return currentNode;
+
                 var foundNode = currentNode.Children
                     .SingleOrDefault(a => a.Name == parameter);
-
-                if(currentNode == null 
-                    || !currentNode.Children.Any())
+                
+                if(foundNode == null)
                     return currentNode;
 
                 completeCommandText = string.Concat(completeCommandText,
