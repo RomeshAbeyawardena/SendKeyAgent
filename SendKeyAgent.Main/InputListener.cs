@@ -60,12 +60,16 @@ namespace SendKeyAgent.App
             logger.LogInformation("Current Connection: {0}", connectionId);
 
             if (!CurrentState.IsRunning || cancellationToken.IsCancellationRequested)
+            {
                 return;
+            }
 
             while (!tcpListener.Pending())
             {
                 if (cancellationToken.IsCancellationRequested)
+                {
                     return;
+                }
 
                 await Task.Delay(1000);
                 continue;
@@ -102,7 +106,7 @@ namespace SendKeyAgent.App
                         //Request has been processed, wait on next request from client.
                         continue;
                     }
-                    
+
                     //Session has been terminated exit loop.
                     break;
                 }
@@ -180,7 +184,9 @@ namespace SendKeyAgent.App
             if ((command = commandParser
                 .ParseCommand(CultureInfo.InvariantCulture, input, out var processedInput)) != null
                     && !string.IsNullOrEmpty(processedInput))
+            {
                 input = processedInput;
+            }
 
             if (input.Trim() == "system.shutdown")
             {
