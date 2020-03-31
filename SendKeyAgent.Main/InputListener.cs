@@ -88,19 +88,22 @@ namespace SendKeyAgent.App
                 if (cancellationToken.IsCancellationRequested)
                 {
                     TerminateSession("OK, Goodbye!", session);
+
+                    //Session has been terminated exit loop.
                     break;
                 }
                 ShowWelcomeText("Welcome friend B-), start typing your message to send (CTRL + Q to quit)\r\nMessage: ", session);
 
                 if (session.HasDataAvailable)
                 {
-
-                    if (!ProcessData(session))
+                    if (ProcessData(session))
                     {
-                        break;
+                        //Request has been processed, wait on next request from client.
+                        continue;
                     }
-
-                    continue;
+                    
+                    //Session has been terminated exit loop.
+                    break;
                 }
 
                 await Task.Delay(500);

@@ -23,6 +23,7 @@ namespace SendKeyAgent.App
             completeCommandText = string.Empty;
 
             var commandTextParameters = commandText
+                .Trim()
                 .Replace("\n", string.Empty)
                 .ToLower(cultureInfo)
                 .Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -54,8 +55,10 @@ namespace SendKeyAgent.App
                 if(foundNode == null)
                     return currentNode;
 
-                completeCommandText = string.Concat(completeCommandText,
-                    ' ',foundNode.CommandText);
+                completeCommandText = string.Concat (
+                    completeCommandText,
+                    ' ',
+                    foundNode.CommandText);
 
                 currentNode = foundNode;
             }
