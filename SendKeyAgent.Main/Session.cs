@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -10,11 +11,15 @@ namespace SendKeyAgent.App
 {
     public sealed class Session : IDisposable
     {
+        private readonly ILogger logger;
+
         public Session (
+            ILogger logger,
             int sessionId,
             TcpClient tcpClient,
             IList<char> data = default)
         {
+            this.logger = logger;
             Id = sessionId;
             DataStream = tcpClient.GetStream();
             Data = data ?? new List<char>();
@@ -39,6 +44,7 @@ namespace SendKeyAgent.App
 
         public void Dispose()
         {
+            logger.LogInformation("Disposing of session #{0}", Id);
             Client.Dispose();
             DataStream.Dispose();
         }

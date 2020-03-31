@@ -17,7 +17,20 @@ namespace SendKeyAgent.App
             this.applicationSettings = applicationSettings;
         }
 
-        public ICommand ParseCommand(CultureInfo cultureInfo, string commandText, 
+        public ICommand GetCommand(IEnumerable<ICommand> commands, string name)
+        {
+            return commands.SingleOrDefault(child => child.Name == name);
+        }
+
+        public ICommand GetChildCommand(ICommand startingNode, string name)
+        {
+            if (startingNode.Children == null || !startingNode.Children.Any())
+                return null;
+
+            return GetCommand(startingNode.Children, name);
+        }
+
+        public ICommand ParseCommand(CultureInfo cultureInfo, string commandText,
             out string completeCommandText, ICommand startingNode = default)
         {
             completeCommandText = string.Empty;
@@ -27,14 +40,17 @@ namespace SendKeyAgent.App
                 .Replace("\n", string.Empty)
                 .ToLower(cultureInfo)
                 .Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            
-            if(startingNode == null)
+
+            if (startingNode == null)
             {
-                startingNode = applicationSettings.Commands
-                    .SingleOrDefault(cmd => cmd.Name == commandTextParameters.FirstOrDefault());
-                
-                 if(startingNode == null)
+                startingNode = GetCommand(
+                    applicationSettings.Commands,
+                    commandTextParameters.FirstOrDefault());
+
+                if (startingNode == null)
+                {
                     return default;
+                }
 
                 commandTextParameters = commandTextParameters
                     .RemoveAt(0)
@@ -43,19 +59,15 @@ namespace SendKeyAgent.App
 
             ICommand currentNode = startingNode;
             completeCommandText = currentNode.CommandText;
-            foreach(var parameter in commandTextParameters)
+            foreach (var parameter in commandTextParameters)
             {
-                if(currentNode.Children == null
-                    || !currentNode.Children.Any())
-                    return currentNode;
-
-                var foundNode = currentNode.Children
-                    .SingleOrDefault(a => a.Name == parameter);
                 
-                if(foundNode == null)
+                var foundNode = GetChildCommand(currentNode, parameter);
+
+                if (foundNode == null)
                     return currentNode;
 
-                completeCommandText = string.Concat (
+                completeCommandText = string.Concat(
                     completeCommandText,
                     ' ',
                     foundNode.CommandText);

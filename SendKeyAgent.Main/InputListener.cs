@@ -81,7 +81,7 @@ namespace SendKeyAgent.App
 
         private async Task AcceptTcpClient(Task<TcpClient> tcpClientTask, CancellationToken cancellationToken)
         {
-            using var session = new Session(connectionId++, await tcpClientTask);
+            using var session = new Session(logger, connectionId++, await tcpClientTask);
 
             while (session.IsConnected)
             {
@@ -92,6 +92,7 @@ namespace SendKeyAgent.App
                     //Session has been terminated exit loop.
                     break;
                 }
+
                 ShowWelcomeText("Welcome friend B-), start typing your message to send (CTRL + Q to quit)\r\nMessage: ", session);
 
                 if (session.HasDataAvailable)
@@ -108,6 +109,7 @@ namespace SendKeyAgent.App
 
                 await Task.Delay(500);
             }
+
             logger.LogInformation("Completed");
         }
 

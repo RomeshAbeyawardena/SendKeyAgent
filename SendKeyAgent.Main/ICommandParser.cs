@@ -11,5 +11,7 @@ namespace SendKeyAgent.App
     {
         ICommand ParseCommand(CultureInfo cultureInfo, string commandText, 
             out string completeCommandText, ICommand startingNode = default);
+
+        
     }
 }
