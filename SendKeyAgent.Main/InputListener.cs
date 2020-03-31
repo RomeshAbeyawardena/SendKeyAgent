@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Reactive.Subjects;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,27 +18,36 @@ namespace SendKeyAgent.App
     {
         private TcpListener tcpListener;
         private int connectionId;
+        private readonly ISubject<ServerState> serverState;
         private readonly ILogger<InputListener> logger;
 
         private readonly IInputSimulator inputSimulator;
         private readonly ICommandParser commandParser;
-
+        private ServerState CurrentState;
         private const int EnterKey = 13;
         private const int EndOfText = 3;
         private const int EndOfTransmission = 4;
         private const int Quit = 17;
 
-        public InputListener(ILogger<InputListener> logger,
+        public InputListener(ISubject<ServerState> serverState, ILogger<InputListener> logger,
             IInputSimulator inputSimulator, ICommandParser commandParser)
         {
+            this.serverState = serverState;
+            serverState.Subscribe(OnNext);
             this.logger = logger;
             this.inputSimulator = inputSimulator;
             this.commandParser = commandParser;
         }
 
+        private void OnNext(ServerState obj)
+        {
+            CurrentState = obj;
+        }
+
         public IInputListener Start(int port = 4000, int backlog = 10)
         {
             tcpListener = new TcpListener(IPAddress.Any, port);
+            serverState.OnNext(new ServerState { IsRunning = true });
             tcpListener.Start(backlog);
             logger.LogInformation("Starting Input Listener on port: {0}. Accepting a maximum of {1} connections.",
                 port, backlog);
@@ -48,6 +58,9 @@ namespace SendKeyAgent.App
         {
 
             logger.LogInformation("Current Connection: {0}", connectionId);
+
+            if (!CurrentState.IsRunning || cancellationToken.IsCancellationRequested)
+                return;
 
             while (!tcpListener.Pending())
             {
@@ -62,66 +75,91 @@ namespace SendKeyAgent.App
             logger.LogInformation("Connection #{0} initated...", currentConnectionId);
 
             await AcceptTcpClient(tcpListener.AcceptTcpClientAsync(), cancellationToken);
+
             await InitConnections(cancellationToken);
         }
 
         private async Task AcceptTcpClient(Task<TcpClient> tcpClientTask, CancellationToken cancellationToken)
         {
-            bool welcomeMessageShown = false;
-            var sessionData = new List<char>();
-            var client = await tcpClientTask;
-            while (client.Connected)
+            using var session = new Session(connectionId++, await tcpClientTask);
+
+            while (session.IsConnected)
             {
-                var dataStream = client.GetStream();
-
-                if (!welcomeMessageShown)
-                {
-                    WriteText(dataStream, "Welcome friend B-), start typing your message to send (CTRL + Q to quit)\r\nMessage: ", Encoding.ASCII);
-                    welcomeMessageShown = true;
-                }
-
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    WriteText(dataStream, "OK, Goodbye!", Encoding.ASCII);
-                    logger.LogInformation("Connection termination requested");
-                    client.Close();
+                    TerminateSession("OK, Goodbye!", session);
                     break;
                 }
+                ShowWelcomeText("Welcome friend B-), start typing your message to send (CTRL + Q to quit)\r\nMessage: ", session);
 
-                if (client.Available < 1)
-                {
-                    await Task.Delay(500);
-                    continue;
-                }
-
-                var data = GetData(dataStream);
-                logger.LogDebug("Receiving data...");
-
-                if (data != -1)
+                if (session.HasDataAvailable)
                 {
 
-                    if (data == Quit)
+                    if (!ProcessData(session))
                     {
-                        WriteText(dataStream, "OK, Goodbye!", Encoding.ASCII);
-                        logger.LogInformation("Connection termination requested");
-                        client.Close();
-                        FlushTextBuffer(sessionData.ToArray());
                         break;
                     }
 
-                    if (data == EnterKey)
-                    {
-                        FlushTextBuffer(sessionData.ToArray());
-                        sessionData.Clear();
-                        WriteText(dataStream, "Message received.\r\nMessage: ", Encoding.ASCII);
-                    }
-                    else
-                    {
-                        sessionData.Add((char)data);
-                    }
+                    continue;
                 }
+
+                await Task.Delay(500);
             }
             logger.LogInformation("Completed");
+        }
+
+        private void TerminateSession(string terminateSessionText, Session session)
+        {
+            WriteText(session.DataStream, terminateSessionText, Encoding.ASCII);
+            logger.LogInformation("Connection termination requested");
+            session.Close();
+        }
+
+        private void ShowWelcomeText(string welcomeText, Session session)
+        {
+
+            if (!session.IsWelcomeMessageShown)
+            {
+                WriteText(session.DataStream, welcomeText, Encoding.ASCII);
+                session.IsWelcomeMessageShown = true;
+            }
+
+        }
+
+        private bool ProcessData(Session session)
+        {
+            logger.LogDebug("Receiving data...");
+            var data = GetData(session.DataStream);
+            if (data != -1)
+            {
+
+                if (data == Quit)
+                {
+                    TerminateSession("OK, Bye!", session);
+                    FlushTextBuffer(session.Data.ToArray());
+                    return false;
+                }
+
+                if (data == EnterKey)
+                {
+                    var result = FlushTextBuffer(session.Data.ToArray());
+                    session.Data.Clear();
+                    WriteText(session.DataStream, "Message received.\r\nMessage: ", Encoding.ASCII);
+
+                    if (!result)
+                    {
+                        session.Client.Close();
+                        tcpListener.Stop();
+                        return false;
+                    }
+                }
+                else
+                {
+                    session.Data.Add((char)data);
+                }
+            }
+
+            return true;
         }
 
         private void WriteText(Stream dataStream, string text, Encoding encoding)
@@ -130,7 +168,7 @@ namespace SendKeyAgent.App
             dataStream.Write(message, 0, message.Length);
         }
 
-        private void FlushTextBuffer(IEnumerable<char> buffer)
+        private bool FlushTextBuffer(IEnumerable<char> buffer)
         {
             var input = string.Join(string.Empty, buffer);
             ICommand command;
@@ -139,8 +177,16 @@ namespace SendKeyAgent.App
                     && !string.IsNullOrEmpty(processedInput))
                 input = processedInput;
 
+            if (input.Trim() == "system.shutdown")
+            {
+                serverState.OnNext(new ServerState { IsRunning = false });
+                return false;
+            }
+
             inputSimulator.Keyboard
                 .TextEntry(input);
+
+            return true;
         }
 
         private int GetData(Stream stream)
