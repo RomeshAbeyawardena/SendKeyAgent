@@ -39,9 +39,11 @@ namespace SendKeyAgent.App
             this.commandParser = commandParser;
         }
 
-        private void OnNext(ServerState obj)
+        private void OnNext(ServerState state)
         {
-            CurrentState = obj;
+            CurrentState = state;
+            if(!state.IsRunning)
+                tcpListener.Stop();
         }
 
         public IInputListener Start(int port = 4000, int backlog = 10)
@@ -57,7 +59,7 @@ namespace SendKeyAgent.App
         public async Task InitConnections(CancellationToken cancellationToken)
         {
 
-            logger.LogInformation("Current Connection: {0}", connectionId);
+            logger.LogInformation("Next connection: {0}", connectionId);
 
             if (!CurrentState.IsRunning || cancellationToken.IsCancellationRequested)
             {
@@ -158,7 +160,7 @@ namespace SendKeyAgent.App
                     if (!result)
                     {
                         session.Client.Close();
-                        tcpListener.Stop();
+                        //tcpListener.Stop();
                         return false;
                     }
                 }
