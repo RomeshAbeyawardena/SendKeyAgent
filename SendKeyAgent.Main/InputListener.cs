@@ -43,7 +43,7 @@ namespace SendKeyAgent.App
         {
             CurrentState = state;
             if(!state.IsRunning)
-                tcpListener.Stop();
+                Stop();
         }
 
         public IInputListener Start(int port = 4000, int backlog = 10)
@@ -74,7 +74,6 @@ namespace SendKeyAgent.App
                 }
 
                 await Task.Delay(1000);
-                continue;
             }
 
             var currentConnectionId = connectionId++;
