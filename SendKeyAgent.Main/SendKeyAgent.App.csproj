@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>netcoreapp3.1</TargetFramework>
     <UserSecretsId>dotnet-SendKeyAgent.App-2271599B-78D2-4082-BB81-B4D52377223A</UserSecretsId>
+    <ApplicationIcon>keyboard(1).ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

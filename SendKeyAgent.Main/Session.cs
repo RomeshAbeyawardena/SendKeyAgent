@@ -47,6 +47,7 @@ namespace SendKeyAgent.App
             logger.LogInformation("Disposing of session #{0}", Id);
             Client.Dispose();
             DataStream.Dispose();
+            logger.LogInformation("Disposing of session #{0} completed", Id);
         }
     }
 }

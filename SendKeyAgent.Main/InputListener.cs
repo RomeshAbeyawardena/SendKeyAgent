@@ -11,6 +11,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using WindowsInput;
+using WindowsInput.Native;
 
 namespace SendKeyAgent.App
 {
@@ -28,6 +29,7 @@ namespace SendKeyAgent.App
         private const int EndOfText = 3;
         private const int EndOfTransmission = 4;
         private const int Quit = 17;
+        private const int KeyboardSleepTimeout = 500;
 
         public InputListener(ISubject<ServerState> serverState, ILogger<InputListener> logger,
             IInputSimulator inputSimulator, ICommandParser commandParser)
@@ -63,6 +65,7 @@ namespace SendKeyAgent.App
 
             if (!CurrentState.IsRunning || cancellationToken.IsCancellationRequested)
             {
+                logger.LogDebug("Input listener is suspended");
                 return;
             }
 
@@ -72,7 +75,7 @@ namespace SendKeyAgent.App
                 {
                     return;
                 }
-
+                logger.LogDebug("No pending connections waiting 500ms before retry");
                 await Task.Delay(1000);
             }
 
@@ -80,20 +83,20 @@ namespace SendKeyAgent.App
             logger.LogInformation("Connection #{0} initated...", currentConnectionId);
 
             await AcceptTcpClient(tcpListener.AcceptTcpClientAsync(), cancellationToken);
-
+            logger.LogDebug("Session ended");
             await InitConnections(cancellationToken);
         }
 
         private async Task AcceptTcpClient(Task<TcpClient> tcpClientTask, CancellationToken cancellationToken)
         {
-            using var session = new Session(logger, connectionId++, await tcpClientTask);
-
+            using (var session = new Session(logger, connectionId++, await tcpClientTask))
             while (session.IsConnected)
             {
+                logger.LogDebug("Session connected");
                 if (cancellationToken.IsCancellationRequested)
                 {
                     TerminateSession("OK, Goodbye!", session);
-
+                    logger.LogDebug("Session while loop ends here. Reason: Cancellation Token requested");
                     //Session has been terminated exit loop.
                     break;
                 }
@@ -102,16 +105,20 @@ namespace SendKeyAgent.App
 
                 if (session.HasDataAvailable)
                 {
+                    logger.LogDebug("Session has data");
                     if (ProcessData(session))
                     {
                         //Request has been processed, wait on next request from client.
                         continue;
                     }
-
-                    //Session has been terminated exit loop.
-                    break;
+                    else 
+                    { 
+                        logger.LogDebug("Session while loop ends here. Reason: User aborted connection");
+                        //Session has terminated exit loop.
+                        break;
+                    }
                 }
-
+                logger.LogDebug("Session in progress");
                 await Task.Delay(500);
             }
 
@@ -122,7 +129,6 @@ namespace SendKeyAgent.App
         {
             WriteText(session.DataStream, terminateSessionText, Encoding.ASCII);
             logger.LogInformation("Connection termination requested");
-            session.Close();
         }
 
         private void ShowWelcomeText(string welcomeText, Session session)
@@ -142,11 +148,11 @@ namespace SendKeyAgent.App
             var data = GetData(session.DataStream);
             if (data != -1)
             {
-
                 if (data == Quit)
                 {
                     TerminateSession("OK, Bye!", session);
                     FlushTextBuffer(session.Data.ToArray());
+                    logger.LogDebug("Quit has completed processing");
                     return false;
                 }
 
@@ -180,12 +186,14 @@ namespace SendKeyAgent.App
 
         private bool FlushTextBuffer(IEnumerable<char> buffer)
         {
+            bool isCommand = false;
             var input = string.Join(string.Empty, buffer);
             ICommand command;
             if ((command = commandParser
                 .ParseCommand(CultureInfo.InvariantCulture, input, out var processedInput)) != null
                     && !string.IsNullOrEmpty(processedInput))
             {
+                isCommand = true;
                 input = processedInput;
             }
 
@@ -195,9 +203,25 @@ namespace SendKeyAgent.App
                 return false;
             }
 
-            inputSimulator.Keyboard
-                .TextEntry(input);
+            // do not send empty character arrays to the input simulator
+            if(!string.IsNullOrWhiteSpace(input))
+            {
+                if (isCommand)
+                {
+                    inputSimulator.Keyboard
+                        .ModifiedKeyStroke(new [] { VirtualKeyCode.CONTROL, VirtualKeyCode.SHIFT }, VirtualKeyCode.VK_C);
+                    
+                    //Wait for console on host machine - increase timeout if required.
+                    inputSimulator.Keyboard.Sleep(KeyboardSleepTimeout);
+                    
+                    inputSimulator.Keyboard
+                    .TextEntry(input);
 
+                    inputSimulator.Keyboard.Sleep(KeyboardSleepTimeout);
+
+                    inputSimulator.Keyboard.KeyUp(VirtualKeyCode.RETURN);
+                }
+            }
             return true;
         }
 
