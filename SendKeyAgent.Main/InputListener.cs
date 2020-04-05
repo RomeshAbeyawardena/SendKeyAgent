@@ -203,7 +203,7 @@ namespace SendKeyAgent.App
                 return false;
             }
 
-            // do not send empty character arrays to the input simulator
+            // do not send empty character arrays to the input simulator it throws an argument null exception
             if(!string.IsNullOrWhiteSpace(input))
             {
                 if (isCommand)
@@ -219,7 +219,12 @@ namespace SendKeyAgent.App
 
                     inputSimulator.Keyboard.Sleep(KeyboardSleepTimeout);
 
-                    inputSimulator.Keyboard.KeyUp(VirtualKeyCode.RETURN);
+                    inputSimulator.Keyboard.KeyPress(VirtualKeyCode.RETURN);
+
+                    inputSimulator.Keyboard.Sleep(KeyboardSleepTimeout);
+
+                    inputSimulator.Keyboard
+                        .ModifiedKeyStroke(new [] { VirtualKeyCode.CONTROL, VirtualKeyCode.SHIFT }, VirtualKeyCode.VK_C);
                 }
             }
             return true;
