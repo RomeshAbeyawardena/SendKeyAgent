@@ -26,6 +26,8 @@ namespace SendKeyAgent.App
             Client = tcpClient;
         }
 
+        public bool SignedIn { get; set; }
+
         public  int Id { get; }
 
         public Stream DataStream { get; }

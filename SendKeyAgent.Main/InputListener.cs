@@ -31,7 +31,8 @@ namespace SendKeyAgent.App
         private const int Quit = 17;
         private const int KeyboardSleepTimeout = 500;
         private const string executorPrecursor = "./";
-        private static string WelcomeText = $"Welcome!\r\nUse {executorPrecursor}[command] to treat message as an executable command\r\n(CTRL + Q to quit)\r\nMessage: ";
+        private const string loginPrecursor = "$USER_PWD:";
+        private static string WelcomeText = $"Welcome!\r\nSend executable commands with {executorPrecursor}[command]\r\n(CTRL + Q to quit)\r\nMessage: ";
 
         public InputListener(ISubject<ServerState> serverState, ILogger<InputListener> logger,
             IInputSimulator inputSimulator, ICommandParser commandParser)
@@ -95,6 +96,7 @@ namespace SendKeyAgent.App
                 while (session.IsConnected)
                 {
                     logger.LogDebug("Session connected");
+
                     if (cancellationToken.IsCancellationRequested)
                     {
                         TerminateSession("OK, Goodbye!", session);
@@ -153,14 +155,23 @@ namespace SendKeyAgent.App
                 if (data == Quit)
                 {
                     TerminateSession("OK, Bye!", session);
-                    FlushTextBuffer(session.Data.ToArray());
+                    FlushTextBuffer(session);
                     logger.LogDebug("Quit has completed processing");
                     return false;
                 }
 
                 if (data == EnterKey)
                 {
-                    var result = FlushTextBuffer(session.Data.ToArray());
+                    if (!session.SignedIn)
+                    {
+                        WriteText(
+                            session.DataStream,
+                            "You must be signed in to use this utility. To sign in type $USER_PWD:[password]",
+                            Encoding.ASCII);
+                        return true;
+                    }
+
+                    var result = FlushTextBuffer(session);
                     session.Data.Clear();
                     WriteText(session.DataStream, "Message received.\r\nMessage: ", Encoding.ASCII);
 
@@ -186,10 +197,10 @@ namespace SendKeyAgent.App
             dataStream.Write(message, 0, message.Length);
         }
 
-        private bool FlushTextBuffer(IEnumerable<char> buffer)
+        private bool FlushTextBuffer(Session session)
         {
             bool isCommand = false;
-            var input = string.Join(string.Empty, buffer);
+            var input = string.Join(string.Empty, session.Data.ToArray());
             ICommand command;
             if ((command = commandParser
                 .ParseCommand(CultureInfo.InvariantCulture, input, out var processedInput)) != null
@@ -199,23 +210,42 @@ namespace SendKeyAgent.App
                 input = processedInput;
             }
 
-            input = input.Trim();
-
-            if (input.Trim() == "system.shutdown")
-            {
-                serverState.OnNext(new ServerState { IsRunning = false });
-                return false;
-            }
-
-            if (input == "toggleConsole")
-            {
-                ToggleConsole();
-                return true;
-            }
-
             // do not send empty character arrays to the input simulator it throws an argument null exception
             if (!string.IsNullOrWhiteSpace(input))
             {
+                input = input.Trim();
+
+                if (input.StartsWith(loginPrecursor))
+                {
+                    session.SignedIn = input
+                        .Replace(loginPrecursor, string.Empty)
+                        .Equals("c@rr0ts_4_l1f3!");
+
+                    if(session.SignedIn)
+                    {
+                        logger.LogInformation("Remote utility sign in successful");
+                    }
+                    else
+                    {
+                        logger.LogWarning("Remote utility sign in unsuccessful");
+                    }
+
+                    return true;
+                }
+
+                if (input == "system.shutdown")
+                {
+                    serverState.OnNext(new ServerState { IsRunning = false });
+                    return false;
+                }
+
+                if (input == "toggleConsole")
+                {
+                    ToggleConsole();
+                    return true;
+                }
+
+
                 if (isCommand)
                 {
                     ToggleConsole();
