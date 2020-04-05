@@ -167,7 +167,7 @@ namespace SendKeyAgent.App
                 if (data == EnterKey)
                 {
                     var result = FlushTextBuffer(session);
-                    if (!session.SignedIn)
+                    if (!session.SignedIn && result)
                     {
                         WriteText(
                             session.DataStream,
@@ -182,7 +182,9 @@ namespace SendKeyAgent.App
 
                     if (!result)
                     {
+                        TerminateSession("OK, Bye!", session);
                         session.Client.Close();
+                        logger.LogDebug("Quit has completed processing");
                         //tcpListener.Stop();
                         return false;
                     }
@@ -225,6 +227,9 @@ namespace SendKeyAgent.App
                 if (!string.IsNullOrWhiteSpace(input))
                 {
                     input = input.Trim();
+
+                    if(input.Equals(":quit"))
+                    return false;
 
                     if (input.StartsWith(loginPrecursor))
                     {
