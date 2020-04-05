@@ -35,7 +35,8 @@ namespace SendKeyAgent.App
         private const int KeyboardSleepTimeout = 500;
         private const string executorPrecursor = "./";
         private const string loginPrecursor = "$USER_PWD:";
-        private static readonly string WelcomeText = $"Welcome!\r\nSend executable commands with {executorPrecursor}[command]\r\n(CTRL + Q to quit)\r\nMessage: ";
+        private const string prompt = "Message: ";
+        private static readonly string WelcomeText = $"Welcome!\r\nSend executable commands with {executorPrecursor}[command]\r\n(CTRL + Q to quit)\r\n{prompt}";
 
         public InputListener(ISubject<ServerState> serverState, ILogger<InputListener> logger,
             IInputSimulator inputSimulator, ApplicationSettings applicationSettings,
@@ -156,7 +157,7 @@ namespace SendKeyAgent.App
                     WriteText(
                         session.DataStream,
                         $"Session has been idle for {session.TimeoutCounter} ms " 
-                            + $" will be terminated after {TimeoutCounterMaximumTicks - session.TimeoutCounter} ms\r\n\r\nMessage: ",
+                            + $" will be terminated after {TimeoutCounterMaximumTicks - session.TimeoutCounter} ms\r\n\r\n{prompt}",
                         Encoding.ASCII);
                     logger.LogWarning("Session {0} has been idle for {1} ms", session.Id, session.TimeoutCounter);
                 }
@@ -218,13 +219,13 @@ namespace SendKeyAgent.App
                     {
                         WriteText(
                             session.DataStream,
-                            "Access Denied: You must be signed in to use this utility.\r\n\tTo sign in type $USER_PWD:[password]\r\nMessage: ",
+                            $"Access Denied: You must be signed in to use this utility.\r\n\tTo sign in type $USER_PWD:[password]\r\n{prompt} ",
                             Encoding.ASCII);
                         return true;
                     }
                     else
                     {
-                        WriteText(session.DataStream, "Message received.\r\nMessage: ", Encoding.ASCII);
+                        WriteText(session.DataStream, $"Message received.\r\n{prompt} ", Encoding.ASCII);
                     }
 
                     if (!result)
