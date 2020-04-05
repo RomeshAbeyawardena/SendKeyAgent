@@ -26,6 +26,7 @@ namespace SendKeyAgent.App
         private readonly ApplicationSettings applicationSettings;
         private readonly ICommandParser commandParser;
         private ServerState CurrentState;
+        private int TimeoutCounterMax = 3600;
         private const int EnterKey = 13;
         private const int EndOfText = 3;
         private const int EndOfTransmission = 4;
@@ -89,8 +90,9 @@ namespace SendKeyAgent.App
             var currentConnectionId = connectionId++;
             logger.LogInformation("Connection #{0} initated...", currentConnectionId);
 
-            await AcceptTcpClient(tcpListener.AcceptTcpClientAsync(), cancellationToken);
-            logger.LogDebug("Session ended");
+            Task.Run(async() => await AcceptTcpClient(tcpListener.AcceptTcpClientAsync(), cancellationToken));
+            await Task.Delay(1500);
+            //logger.LogDebug("Session ended");
             await InitConnections(cancellationToken);
         }
 
@@ -113,6 +115,7 @@ namespace SendKeyAgent.App
 
                     if (session.HasDataAvailable)
                     {
+                        session.TimeoutCounter = 0;
                         logger.LogDebug("Session has data");
                         if (ProcessData(session))
                         {
@@ -126,6 +129,28 @@ namespace SendKeyAgent.App
                             break;
                         }
                     }
+                    else
+                    {
+                        if(session.TimeoutCounter < TimeoutCounterMax)
+                        { 
+                            session.TimeoutCounter++;
+
+                            if (session.TimeoutCounter % 100 == 1)
+                            {
+                                logger.LogWarning("Session {0} has been idle for {1}", session.Id, session.TimeoutCounter);
+                            }
+                        }
+                        else
+                        {
+                            session.TimeoutCounter = 0;
+                            logger.LogInformation(
+                                "Session {0} expired (Timeout Counter: {1})", 
+                                session.Id, 
+                                session.TimeoutCounter);
+                            break;
+                        }
+                    }
+
                     logger.LogDebug("Session in progress");
                     await Task.Delay(500);
                 }

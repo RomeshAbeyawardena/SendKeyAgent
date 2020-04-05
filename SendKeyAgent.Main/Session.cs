@@ -26,6 +26,8 @@ namespace SendKeyAgent.App
             Client = tcpClient;
         }
 
+        public int TimeoutCounter { get; set; }
+
         public bool SignedIn { get; set; }
 
         public  int Id { get; }
