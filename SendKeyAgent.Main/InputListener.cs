@@ -30,6 +30,8 @@ namespace SendKeyAgent.App
         private const int EndOfTransmission = 4;
         private const int Quit = 17;
         private const int KeyboardSleepTimeout = 500;
+        private const string executorPrecursor = "./";
+        private static string WelcomeText = $"Welcome!\r\nUse {executorPrecursor}[command] to treat message as an executable command\r\n(CTRL + Q to quit)\r\nMessage: ";
 
         public InputListener(ISubject<ServerState> serverState, ILogger<InputListener> logger,
             IInputSimulator inputSimulator, ICommandParser commandParser)
@@ -44,7 +46,7 @@ namespace SendKeyAgent.App
         private void OnNext(ServerState state)
         {
             CurrentState = state;
-            if(!state.IsRunning)
+            if (!state.IsRunning)
                 Stop();
         }
 
@@ -90,37 +92,37 @@ namespace SendKeyAgent.App
         private async Task AcceptTcpClient(Task<TcpClient> tcpClientTask, CancellationToken cancellationToken)
         {
             using (var session = new Session(logger, connectionId++, await tcpClientTask))
-            while (session.IsConnected)
-            {
-                logger.LogDebug("Session connected");
-                if (cancellationToken.IsCancellationRequested)
+                while (session.IsConnected)
                 {
-                    TerminateSession("OK, Goodbye!", session);
-                    logger.LogDebug("Session while loop ends here. Reason: Cancellation Token requested");
-                    //Session has been terminated exit loop.
-                    break;
-                }
-
-                ShowWelcomeText("Welcome friend B-), start typing your message to send (CTRL + Q to quit)\r\nMessage: ", session);
-
-                if (session.HasDataAvailable)
-                {
-                    logger.LogDebug("Session has data");
-                    if (ProcessData(session))
+                    logger.LogDebug("Session connected");
+                    if (cancellationToken.IsCancellationRequested)
                     {
-                        //Request has been processed, wait on next request from client.
-                        continue;
-                    }
-                    else 
-                    { 
-                        logger.LogDebug("Session while loop ends here. Reason: User aborted connection");
-                        //Session has terminated exit loop.
+                        TerminateSession("OK, Goodbye!", session);
+                        logger.LogDebug("Session while loop ends here. Reason: Cancellation Token requested");
+                        //Session has been terminated exit loop.
                         break;
                     }
+
+                    ShowWelcomeText(WelcomeText, session);
+
+                    if (session.HasDataAvailable)
+                    {
+                        logger.LogDebug("Session has data");
+                        if (ProcessData(session))
+                        {
+                            //Request has been processed, wait on next request from client.
+                            continue;
+                        }
+                        else
+                        {
+                            logger.LogDebug("Session while loop ends here. Reason: User aborted connection");
+                            //Session has terminated exit loop.
+                            break;
+                        }
+                    }
+                    logger.LogDebug("Session in progress");
+                    await Task.Delay(500);
                 }
-                logger.LogDebug("Session in progress");
-                await Task.Delay(500);
-            }
 
             logger.LogInformation("Completed");
         }
@@ -197,37 +199,67 @@ namespace SendKeyAgent.App
                 input = processedInput;
             }
 
+            input = input.Trim();
+
             if (input.Trim() == "system.shutdown")
             {
                 serverState.OnNext(new ServerState { IsRunning = false });
                 return false;
             }
 
+            if (input == "toggleConsole")
+            {
+                ToggleConsole();
+                return true;
+            }
+
             // do not send empty character arrays to the input simulator it throws an argument null exception
-            if(!string.IsNullOrWhiteSpace(input))
+            if (!string.IsNullOrWhiteSpace(input))
             {
                 if (isCommand)
                 {
-                    inputSimulator.Keyboard
-                        .ModifiedKeyStroke(new [] { VirtualKeyCode.CONTROL, VirtualKeyCode.SHIFT }, VirtualKeyCode.VK_C);
-                    
+                    ToggleConsole();
                     //Wait for console on host machine - increase timeout if required.
                     inputSimulator.Keyboard.Sleep(KeyboardSleepTimeout);
-                    
+
                     inputSimulator.Keyboard
                     .TextEntry(input);
 
-                    inputSimulator.Keyboard.Sleep(KeyboardSleepTimeout);
+                    KeyboardSleep(KeyboardSleepTimeout);
 
                     inputSimulator.Keyboard.KeyPress(VirtualKeyCode.RETURN);
 
-                    inputSimulator.Keyboard.Sleep(KeyboardSleepTimeout);
+                    KeyboardSleep(KeyboardSleepTimeout);
+
+                    ToggleConsole();
+                }
+                else
+                {
+                    bool executable = input.StartsWith(executorPrecursor);
 
                     inputSimulator.Keyboard
-                        .ModifiedKeyStroke(new [] { VirtualKeyCode.CONTROL, VirtualKeyCode.SHIFT }, VirtualKeyCode.VK_C);
+                        .TextEntry(executable ? input.Replace(executorPrecursor, string.Empty) : input);
+
+                    if (executable)
+                    {
+                        KeyboardSleep(KeyboardSleepTimeout);
+                        inputSimulator.Keyboard.KeyPress(VirtualKeyCode.RETURN);
+                    }
                 }
             }
+
             return true;
+        }
+
+        private void KeyboardSleep(int keyboardSleepTimeout)
+        {
+            inputSimulator.Keyboard.Sleep(keyboardSleepTimeout);
+        }
+
+        private void ToggleConsole()
+        {
+            inputSimulator.Keyboard
+                .ModifiedKeyStroke(new[] { VirtualKeyCode.CONTROL, VirtualKeyCode.SHIFT }, VirtualKeyCode.VK_C);
         }
 
         private int GetData(Stream stream)
