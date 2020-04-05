@@ -23,6 +23,7 @@ namespace SendKeyAgent.App
         private readonly ILogger<InputListener> logger;
 
         private readonly IInputSimulator inputSimulator;
+        private readonly ApplicationSettings applicationSettings;
         private readonly ICommandParser commandParser;
         private ServerState CurrentState;
         private const int EnterKey = 13;
@@ -32,15 +33,17 @@ namespace SendKeyAgent.App
         private const int KeyboardSleepTimeout = 500;
         private const string executorPrecursor = "./";
         private const string loginPrecursor = "$USER_PWD:";
-        private static string WelcomeText = $"Welcome!\r\nSend executable commands with {executorPrecursor}[command]\r\n(CTRL + Q to quit)\r\nMessage: ";
+        private static readonly string WelcomeText = $"Welcome!\r\nSend executable commands with {executorPrecursor}[command]\r\n(CTRL + Q to quit)\r\nMessage: ";
 
         public InputListener(ISubject<ServerState> serverState, ILogger<InputListener> logger,
-            IInputSimulator inputSimulator, ICommandParser commandParser)
+            IInputSimulator inputSimulator, ApplicationSettings applicationSettings, 
+            ICommandParser commandParser)
         {
             this.serverState = serverState;
             serverState.Subscribe(OnNext);
             this.logger = logger;
             this.inputSimulator = inputSimulator;
+            this.applicationSettings = applicationSettings;
             this.commandParser = commandParser;
         }
 
@@ -78,6 +81,7 @@ namespace SendKeyAgent.App
                 {
                     return;
                 }
+
                 logger.LogDebug("No pending connections waiting 500ms before retry");
                 await Task.Delay(1000);
             }
@@ -162,18 +166,19 @@ namespace SendKeyAgent.App
 
                 if (data == EnterKey)
                 {
+                    var result = FlushTextBuffer(session);
                     if (!session.SignedIn)
                     {
                         WriteText(
                             session.DataStream,
-                            "You must be signed in to use this utility. To sign in type $USER_PWD:[password]",
+                            "Access Denied: You must be signed in to use this utility.\r\n\tTo sign in type $USER_PWD:[password]\r\nMessage: ",
                             Encoding.ASCII);
                         return true;
                     }
-
-                    var result = FlushTextBuffer(session);
-                    session.Data.Clear();
-                    WriteText(session.DataStream, "Message received.\r\nMessage: ", Encoding.ASCII);
+                    else
+                    {
+                        WriteText(session.DataStream, "Message received.\r\nMessage: ", Encoding.ASCII);
+                    }
 
                     if (!result)
                     {
@@ -201,83 +206,103 @@ namespace SendKeyAgent.App
         {
             bool isCommand = false;
             var input = string.Join(string.Empty, session.Data.ToArray());
-            ICommand command;
-            if ((command = commandParser
-                .ParseCommand(CultureInfo.InvariantCulture, input, out var processedInput)) != null
-                    && !string.IsNullOrEmpty(processedInput))
+
+            try
             {
-                isCommand = true;
-                input = processedInput;
+                if (session.SignedIn)
+                {
+                    ICommand command;
+                    if ((command = commandParser
+                        .ParseCommand(CultureInfo.InvariantCulture, input, out var processedInput)) != null
+                            && !string.IsNullOrEmpty(processedInput))
+                    {
+                        isCommand = true;
+                        input = processedInput;
+                    }
+                }
+
+                // do not send empty character arrays to the input simulator it throws an argument null exception
+                if (!string.IsNullOrWhiteSpace(input))
+                {
+                    input = input.Trim();
+
+                    if (input.StartsWith(loginPrecursor))
+                    {
+                        session.SignedIn = input
+                            .Replace(loginPrecursor, string.Empty)
+                            .Equals(applicationSettings.Security.Password);
+
+                        if (session.SignedIn)
+                        {
+                            logger.LogInformation("Remote utility sign in successful");
+                        }
+                        else
+                        {
+                            logger.LogWarning("Remote utility sign in unsuccessful");
+                        }
+
+                        return true;
+                    }
+
+                    if (session.SignedIn)
+                    {
+                        return ProcessWhenSignedIn(input, isCommand);
+                    }
+                }
+            }
+            finally
+            {
+                session.Data.Clear();
             }
 
-            // do not send empty character arrays to the input simulator it throws an argument null exception
-            if (!string.IsNullOrWhiteSpace(input))
+            return true;
+        }
+
+        private bool ProcessWhenSignedIn(string input, bool isCommand)
+        {
+
+            if (input == "system.shutdown")
             {
-                input = input.Trim();
+                serverState.OnNext(new ServerState { IsRunning = false });
+                return false;
+            }
 
-                if (input.StartsWith(loginPrecursor))
-                {
-                    session.SignedIn = input
-                        .Replace(loginPrecursor, string.Empty)
-                        .Equals("c@rr0ts_4_l1f3!");
+            if (input == "toggleConsole")
+            {
+                ToggleConsole();
+                return true;
+            }
 
-                    if(session.SignedIn)
-                    {
-                        logger.LogInformation("Remote utility sign in successful");
-                    }
-                    else
-                    {
-                        logger.LogWarning("Remote utility sign in unsuccessful");
-                    }
+            if (isCommand)
+            {
+                ToggleConsole();
+                //Wait for console on host machine - increase timeout if required.
+                inputSimulator.Keyboard.Sleep(KeyboardSleepTimeout);
 
-                    return true;
-                }
-
-                if (input == "system.shutdown")
-                {
-                    serverState.OnNext(new ServerState { IsRunning = false });
-                    return false;
-                }
-
-                if (input == "toggleConsole")
-                {
-                    ToggleConsole();
-                    return true;
-                }
-
-
-                if (isCommand)
-                {
-                    ToggleConsole();
-                    //Wait for console on host machine - increase timeout if required.
-                    inputSimulator.Keyboard.Sleep(KeyboardSleepTimeout);
-
-                    inputSimulator.Keyboard
+                inputSimulator.Keyboard
                     .TextEntry(input);
 
-                    KeyboardSleep(KeyboardSleepTimeout);
+                KeyboardSleep(KeyboardSleepTimeout);
 
-                    inputSimulator.Keyboard.KeyPress(VirtualKeyCode.RETURN);
+                inputSimulator.Keyboard.KeyPress(VirtualKeyCode.RETURN);
 
-                    KeyboardSleep(KeyboardSleepTimeout);
+                KeyboardSleep(KeyboardSleepTimeout);
 
-                    ToggleConsole();
-                }
-                else
+                ToggleConsole();
+            }
+            else
+            {
+                bool executable = input.StartsWith(executorPrecursor);
+
+                inputSimulator.Keyboard
+                    .TextEntry(executable ? input.Replace(executorPrecursor, string.Empty) : input);
+
+                if (executable)
                 {
-                    bool executable = input.StartsWith(executorPrecursor);
-
-                    inputSimulator.Keyboard
-                        .TextEntry(executable ? input.Replace(executorPrecursor, string.Empty) : input);
-
-                    if (executable)
-                    {
-                        KeyboardSleep(KeyboardSleepTimeout);
-                        inputSimulator.Keyboard.KeyPress(VirtualKeyCode.RETURN);
-                    }
+                    KeyboardSleep(KeyboardSleepTimeout);
+                    inputSimulator.Keyboard.KeyPress(VirtualKeyCode.RETURN);
                 }
             }
-
             return true;
         }
 

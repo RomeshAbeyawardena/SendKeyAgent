@@ -15,5 +15,6 @@ namespace SendKeyAgent.App
         }
 
         public IEnumerable<Command> Commands { get; set; }
+        public Security Security { get; set; }
     }
 }
