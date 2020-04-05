@@ -27,7 +27,7 @@ namespace SendKeyAgent.App
         private readonly ICommandParser commandParser;
         private ServerState CurrentState;
         private const int TimeoutCounterTicksPerMinute = 120;
-        private int TimeoutCounterMaximumTicks =>  TimeoutCounterTicksPerMinute * applicationSettings.TimeoutInterval;
+        private int TimeoutCounterMaximumTicks =>  TimeoutCounterTicksPerMinute * applicationSettings.Security.TimeoutInterval;
         private const int EnterKey = 13;
         private const int EndOfText = 3;
         private const int EndOfTransmission = 4;
@@ -156,7 +156,7 @@ namespace SendKeyAgent.App
                     WriteText(
                         session.DataStream,
                         $"Session has been idle for {session.TimeoutCounter} ms " 
-                            + " will be terminated after {TimeoutCounterMax - session.TimeoutCounter} ms\r\n\r\nMessage: ",
+                            + $" will be terminated after {TimeoutCounterMaximumTicks - session.TimeoutCounter} ms\r\n\r\nMessage: ",
                         Encoding.ASCII);
                     logger.LogWarning("Session {0} has been idle for {1} ms", session.Id, session.TimeoutCounter);
                 }
