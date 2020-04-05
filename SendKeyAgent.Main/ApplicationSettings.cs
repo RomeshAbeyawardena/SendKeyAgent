@@ -14,7 +14,10 @@ namespace SendKeyAgent.App
             configuration.Bind(this);
         }
 
+        public int TimeoutInterval { get; set; }
+
         public IEnumerable<Command> Commands { get; set; }
+
         public Security Security { get; set; }
     }
 }

@@ -26,7 +26,8 @@ namespace SendKeyAgent.App
         private readonly ApplicationSettings applicationSettings;
         private readonly ICommandParser commandParser;
         private ServerState CurrentState;
-        private int TimeoutCounterMax = 3600;
+        private const int TimeoutCounterTicksPerMinute = 120;
+        private int TimeoutCounterMaximumTicks =>  TimeoutCounterTicksPerMinute * applicationSettings.TimeoutInterval;
         private const int EnterKey = 13;
         private const int EndOfText = 3;
         private const int EndOfTransmission = 4;
@@ -37,7 +38,7 @@ namespace SendKeyAgent.App
         private static readonly string WelcomeText = $"Welcome!\r\nSend executable commands with {executorPrecursor}[command]\r\n(CTRL + Q to quit)\r\nMessage: ";
 
         public InputListener(ISubject<ServerState> serverState, ILogger<InputListener> logger,
-            IInputSimulator inputSimulator, ApplicationSettings applicationSettings, 
+            IInputSimulator inputSimulator, ApplicationSettings applicationSettings,
             ICommandParser commandParser)
         {
             this.serverState = serverState;
@@ -90,7 +91,7 @@ namespace SendKeyAgent.App
             var currentConnectionId = connectionId++;
             logger.LogInformation("Connection #{0} initated...", currentConnectionId);
 
-            Task.Run(async() => await AcceptTcpClient(tcpListener.AcceptTcpClientAsync(), cancellationToken));
+            Task.Run(async () => await AcceptTcpClient(tcpListener.AcceptTcpClientAsync(), cancellationToken));
             await Task.Delay(1500);
             //logger.LogDebug("Session ended");
             await InitConnections(cancellationToken);
@@ -131,22 +132,8 @@ namespace SendKeyAgent.App
                     }
                     else
                     {
-                        if(session.TimeoutCounter < TimeoutCounterMax)
-                        { 
-                            session.TimeoutCounter++;
-
-                            if (session.TimeoutCounter % 100 == 1)
-                            {
-                                logger.LogWarning("Session {0} has been idle for {1}", session.Id, session.TimeoutCounter);
-                            }
-                        }
-                        else
+                        if(!IsSessionIsValid(session))
                         {
-                            session.TimeoutCounter = 0;
-                            logger.LogInformation(
-                                "Session {0} expired (Timeout Counter: {1})", 
-                                session.Id, 
-                                session.TimeoutCounter);
                             break;
                         }
                     }
@@ -155,7 +142,42 @@ namespace SendKeyAgent.App
                     await Task.Delay(500);
                 }
 
-            logger.LogInformation("Completed");
+            logger.LogInformation("Session Completed");
+        }
+
+        private bool IsSessionIsValid(Session session)
+        {
+            if (session.TimeoutCounter < TimeoutCounterMaximumTicks)
+            {
+                session.TimeoutCounter++;
+
+                if (session.TimeoutCounter % 100 == 1)
+                {
+                    WriteText(
+                        session.DataStream,
+                        $"Session has been idle for {session.TimeoutCounter} ms " 
+                            + " will be terminated after {TimeoutCounterMax - session.TimeoutCounter} ms\r\n\r\nMessage: ",
+                        Encoding.ASCII);
+                    logger.LogWarning("Session {0} has been idle for {1} ms", session.Id, session.TimeoutCounter);
+                }
+            }
+            else
+            {
+                session.TimeoutCounter = 0;
+                logger.LogInformation(
+                    "Session {0} expired (Timeout Counter: {1} ms)",
+                    session.Id,
+                    session.TimeoutCounter);
+                
+                WriteText(
+                        session.DataStream,
+                        $"Session has been idle for {session.TimeoutCounter} ms and will be terminated.",
+                        Encoding.ASCII);
+
+                return false;
+            }
+
+            return true;
         }
 
         private void TerminateSession(string terminateSessionText, Session session)
@@ -253,8 +275,8 @@ namespace SendKeyAgent.App
                 {
                     input = input.Trim();
 
-                    if(input.Equals(":quit"))
-                    return false;
+                    if (input.Equals(":quit"))
+                        return false;
 
                     if (input.StartsWith(loginPrecursor))
                     {
@@ -264,11 +286,11 @@ namespace SendKeyAgent.App
 
                         if (session.SignedIn)
                         {
-                            logger.LogInformation("Remote utility sign in successful");
+                            logger.LogInformation("Remote utility sign-in successful");
                         }
                         else
                         {
-                            logger.LogWarning("Remote utility sign in unsuccessful");
+                            logger.LogWarning("Remote utility sign-in unsuccessful");
                         }
 
                         return true;
