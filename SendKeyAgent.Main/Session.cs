@@ -40,6 +40,8 @@ namespace SendKeyAgent.App
 
         public bool IsWelcomeMessageShown { get; set; }
 
+        public string UserName { get; set; }
+
         public bool IsConnected => Client.Connected;
 
         public bool HasDataAvailable => Client.Available > 0;

@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Reactive.Subjects;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -34,9 +35,19 @@ namespace SendKeyAgent.App
         private const int Quit = 17;
         private const int KeyboardSleepTimeout = 500;
         private const string executorPrecursor = "./";
-        private const string loginPrecursor = "$USER_PWD:";
-        private const string prompt = "Message: ";
-        private static readonly string WelcomeText = $"Welcome!\r\nSend executable commands with {executorPrecursor}[command]\r\n(CTRL + Q to quit)\r\n{prompt}";
+        private const string loginPrecursor = "$LOGIN:";
+        private const string setUserNamePrecursor = "$USER_NAME:SET:";
+        private const string getUserNamePrecursor = "$USER_NAME:GET";
+        private const string namedPrompt = "${0}: ";
+        private const string prompt = "$guest: ";
+        private static readonly string WelcomeText = 
+            "\t======Send Key Agent======\t\r\n"
+            + $"\t======Version { Assembly.GetEntryAssembly().GetName().Version }======\t\r\n"
+            + "Welcome!\r\n" 
+            + $"Set session user name with {setUserNamePrecursor}\r\n"
+            + $"Get session user name with {getUserNamePrecursor}\r\n"
+            + $"Send executable commands with {executorPrecursor}[command]\r\n" 
+            + $"(CTRL + Q or :quit to close current session)\r\n{prompt}";
 
         public InputListener(ISubject<ServerState> serverState, ILogger<InputListener> logger,
             IInputSimulator inputSimulator, ApplicationSettings applicationSettings,
@@ -98,6 +109,16 @@ namespace SendKeyAgent.App
             await InitConnections(cancellationToken);
         }
 
+        private string GetPrompt(Session session)
+        {
+            if(string.IsNullOrEmpty(session.UserName))
+            { 
+                return prompt;
+            }
+
+            return string.Format(namedPrompt, session.UserName);
+        }
+
         private async Task AcceptTcpClient(Task<TcpClient> tcpClientTask, CancellationToken cancellationToken)
         {
             using (var session = new Session(logger, connectionId++, await tcpClientTask))
@@ -152,27 +173,28 @@ namespace SendKeyAgent.App
             {
                 session.TimeoutCounter++;
 
-                if (session.TimeoutCounter % 100 == 1)
+                if (session.TimeoutCounter > 1 
+                        && session.TimeoutCounter % 1000 == 1)
                 {
                     WriteText(
                         session.DataStream,
-                        $"Session has been idle for {session.TimeoutCounter} ms " 
-                            + $" will be terminated after {TimeoutCounterMaximumTicks - session.TimeoutCounter} ms\r\n\r\n{prompt}",
+                        $"Session has been idle for {session.TimeoutCounter} ticks " 
+                            + $"and will be terminated after {TimeoutCounterMaximumTicks - session.TimeoutCounter} ticks\r\n\r\n{GetPrompt(session)}",
                         Encoding.ASCII);
-                    logger.LogWarning("Session {0} has been idle for {1} ms", session.Id, session.TimeoutCounter);
+                    logger.LogWarning("Session {0} has been idle for {1} ticks", session.Id, session.TimeoutCounter);
                 }
             }
             else
             {
                 session.TimeoutCounter = 0;
                 logger.LogInformation(
-                    "Session {0} expired (Timeout Counter: {1} ms)",
+                    "Session {0} expired (Timeout Counter: {1} ticks)",
                     session.Id,
                     session.TimeoutCounter);
                 
                 WriteText(
                         session.DataStream,
-                        $"Session has been idle for {session.TimeoutCounter} ms and will be terminated.",
+                        $"Session has been idle for {session.TimeoutCounter} ticks and will be terminated.",
                         Encoding.ASCII);
 
                 return false;
@@ -215,20 +237,21 @@ namespace SendKeyAgent.App
                 if (data == EnterKey)
                 {
                     var result = FlushTextBuffer(session);
-                    if (!session.SignedIn && result)
+                    if (!session.SignedIn && !result.IsSuccessful)
                     {
-                        WriteText(
+                        WriteText (
                             session.DataStream,
-                            $"Access Denied: You must be signed in to use this utility.\r\n\tTo sign in type $USER_PWD:[password]\r\n{prompt} ",
+                            $"\r\n\r\nAccess Denied: You must be signed in to use this utility.\r\n\t" 
+                            + $"To sign in type {loginPrecursor}[password]\r\n{GetPrompt(session)} ",
                             Encoding.ASCII);
                         return true;
                     }
                     else
                     {
-                        WriteText(session.DataStream, $"Message received.\r\n{prompt} ", Encoding.ASCII);
+                        WriteText(session.DataStream, $"Message received.\r\n{GetPrompt(session)} ", Encoding.ASCII);
                     }
 
-                    if (!result)
+                    if (result.Abort)
                     {
                         TerminateSession("OK, Bye!", session);
                         session.Client.Close();
@@ -252,7 +275,7 @@ namespace SendKeyAgent.App
             dataStream.Write(message, 0, message.Length);
         }
 
-        private bool FlushTextBuffer(Session session)
+        private Result FlushTextBuffer(Session session)
         {
             bool isCommand = false;
             var input = string.Join(string.Empty, session.Data.ToArray());
@@ -277,7 +300,22 @@ namespace SendKeyAgent.App
                     input = input.Trim();
 
                     if (input.Equals(":quit"))
-                        return false;
+                        return Result.Success(true);
+
+                    if (input.StartsWith(setUserNamePrecursor))
+                    {
+                        session.UserName = input
+                            .Replace(setUserNamePrecursor, string.Empty);
+                        WriteText(session.DataStream, $"User name has been set to {session.UserName}, this will be reset on session termination.", Encoding.ASCII);
+
+                        return Result.Success();
+                    }
+
+                    if (input.StartsWith(getUserNamePrecursor))
+                    {
+                        WriteText(session.DataStream, $"User name has been set to {session.UserName}", Encoding.ASCII);
+                        return Result.Success();
+                    }
 
                     if (input.StartsWith(loginPrecursor))
                     {
@@ -294,7 +332,7 @@ namespace SendKeyAgent.App
                             logger.LogWarning("Remote utility sign-in unsuccessful");
                         }
 
-                        return true;
+                        return Result.Success();
                     }
 
                     if (session.SignedIn)
@@ -308,22 +346,22 @@ namespace SendKeyAgent.App
                 session.Data.Clear();
             }
 
-            return true;
+            return Result.Failed();
         }
 
-        private bool ProcessWhenSignedIn(string input, bool isCommand)
+        private Result ProcessWhenSignedIn(string input, bool isCommand)
         {
 
             if (input == "system.shutdown")
             {
                 serverState.OnNext(new ServerState { IsRunning = false });
-                return false;
+                return Result.Success(true);
             }
 
             if (input == "toggleConsole")
             {
                 ToggleConsole();
-                return true;
+                return Result.Success();
             }
 
             if (isCommand)
@@ -356,7 +394,7 @@ namespace SendKeyAgent.App
                     inputSimulator.Keyboard.KeyPress(VirtualKeyCode.RETURN);
                 }
             }
-            return true;
+            return Result.Success();
         }
 
         private void KeyboardSleep(int keyboardSleepTimeout)
