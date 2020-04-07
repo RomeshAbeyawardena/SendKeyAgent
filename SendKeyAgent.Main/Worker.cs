@@ -26,8 +26,10 @@ namespace SendKeyAgent.App
 
         private void OnNext(ServerState obj)
         {
+            logger.LogInformation("Server state object has changed");
             if(!obj.IsRunning)
             {
+                logger.LogInformation("Server state object has requested termination, terminating processes.");
                 Dispose();
             }
         }

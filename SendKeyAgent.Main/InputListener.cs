@@ -22,7 +22,7 @@ namespace SendKeyAgent.App
         private int connectionId;
         private readonly ISubject<ServerState> serverState;
         private readonly ILogger<InputListener> logger;
-
+        private readonly List<Session> sessionList;
         private readonly IInputSimulator inputSimulator;
         private readonly ApplicationSettings applicationSettings;
         private readonly ICommandParser commandParser;
@@ -44,9 +44,9 @@ namespace SendKeyAgent.App
             "\t======Send Key Agent======\t\r\n"
             + $"\t======Version { Assembly.GetEntryAssembly().GetName().Version }======\t\r\n"
             + "Welcome!\r\n" 
-            + $"Set session user name with {setUserNamePrecursor}\r\n"
-            + $"Get session user name with {getUserNamePrecursor}\r\n"
-            + $"Send executable commands with {executorPrecursor}[command]\r\n" 
+            + $"\t* Set session user name with {setUserNamePrecursor}[username]\r\n"
+            + $"\t* Get current session user name with {getUserNamePrecursor}\r\n"
+            + $"\t* Send executable commands with {executorPrecursor}[command]\r\n" 
             + $"(CTRL + Q or :quit to close current session)\r\n{prompt}";
 
         public InputListener(ISubject<ServerState> serverState, ILogger<InputListener> logger,
@@ -59,6 +59,7 @@ namespace SendKeyAgent.App
             this.inputSimulator = inputSimulator;
             this.applicationSettings = applicationSettings;
             this.commandParser = commandParser;
+            sessionList = new List<Session>();
         }
 
         private void OnNext(ServerState state)
@@ -122,6 +123,12 @@ namespace SendKeyAgent.App
         private async Task AcceptTcpClient(Task<TcpClient> tcpClientTask, CancellationToken cancellationToken)
         {
             using (var session = new Session(logger, connectionId++, await tcpClientTask))
+            {
+                if(!sessionList.Contains(session))
+                {
+                    sessionList.Add(session);
+                }
+
                 while (session.IsConnected)
                 {
                     logger.LogDebug("Session connected");
@@ -163,7 +170,7 @@ namespace SendKeyAgent.App
                     logger.LogDebug("Session in progress");
                     await Task.Delay(500);
                 }
-
+            }
             logger.LogInformation("Session Completed");
         }
 
@@ -271,7 +278,7 @@ namespace SendKeyAgent.App
 
         private void WriteText(Stream dataStream, string text, Encoding encoding)
         {
-            var message = Encoding.ASCII.GetBytes(text);
+            var message = encoding.GetBytes(text);
             dataStream.Write(message, 0, message.Length);
         }
 
@@ -313,16 +320,29 @@ namespace SendKeyAgent.App
 
                     if (input.StartsWith(getUserNamePrecursor))
                     {
+                        if (string.IsNullOrWhiteSpace(session.UserName))
+                        {
+                            WriteText (
+                                session.DataStream, 
+                                $"User name has not been set, you can set the user name at any time with {setUserNamePrecursor}", 
+                                Encoding.ASCII);
+
+                            return Result.Success();
+                        }
+
                         WriteText(session.DataStream, $"User name has been set to {session.UserName}", Encoding.ASCII);
                         return Result.Success();
                     }
 
                     if (input.StartsWith(loginPrecursor))
                     {
+                        WriteText(session.DataStream, "Please wait...", Encoding.ASCII);
+                        Task.Delay(1000);
                         session.SignedIn = input
                             .Replace(loginPrecursor, string.Empty)
                             .Equals(applicationSettings.Security.Password);
 
+                        WriteText(session.DataStream, "Done! If the password was valid you should have access to all areas.", Encoding.ASCII);
                         if (session.SignedIn)
                         {
                             logger.LogInformation("Remote utility sign-in successful");
@@ -337,7 +357,7 @@ namespace SendKeyAgent.App
 
                     if (session.SignedIn)
                     {
-                        return ProcessWhenSignedIn(input, isCommand);
+                        return ProcessWhenSignedIn(session, input, isCommand);
                     }
                 }
             }
@@ -348,9 +368,25 @@ namespace SendKeyAgent.App
 
             return Result.Failed();
         }
-
-        private Result ProcessWhenSignedIn(string input, bool isCommand)
+        private const string tabularSeparator = "\t|\t";
+        private Result ProcessWhenSignedIn(Session currentSession, string input, bool isCommand)
         {
+            if(input == "who")
+            {
+                var sessionListStringBuilder = new StringBuilder($"Id{tabularSeparator}User Name{tabularSeparator}Connected{tabularSeparator}Is Current\r\n");
+                foreach(var session in sessionList)
+                {
+                    sessionListStringBuilder.AppendFormat("{1}{0}{2}{0}{3}{0}{4}\r\n", 
+                        tabularSeparator, 
+                        session.Id, 
+                        session.UserName ?? "Guest", 
+                        session.IsConnected, 
+                        session.Id == currentSession.Id);
+                }
+
+                WriteText(currentSession.DataStream, sessionListStringBuilder.ToString(), Encoding.ASCII);
+                return Result.Success();
+            }
 
             if (input == "system.shutdown")
             {

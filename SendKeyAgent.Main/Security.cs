@@ -15,7 +15,7 @@ namespace SendKeyAgent.App
                 ? string.Empty 
                 : Encoding.GetString(Convert.FromBase64String(password)); 
             set => password = value; }
-        public Encoding Encoding { get => encoding == null ? (Encoding = Encoding.ASCII) : encoding; set => encoding = value;  }
+        public Encoding Encoding { get => encoding ?? (Encoding = Encoding.ASCII); set => encoding = value;  }
         public int TimeoutInterval { get; set; }
     }
 }
