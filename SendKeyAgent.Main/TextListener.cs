@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -19,6 +20,10 @@ namespace SendKeyAgent.App
         private readonly ILogger<IInputListener> logger;
         private int connectionId;
         private readonly List<Session> sessionList;
+        private const int EnterKey = 13;
+        private const int EndOfText = 3;
+        private const int EndOfTransmission = 4;
+        private const int Quit = 17;
 
         public IInputListener Start(int port = 4000, int backlog = 10)
         {
@@ -61,7 +66,6 @@ namespace SendKeyAgent.App
             await InitConnections(cancellationToken);
         }
 
-        
         private async Task AcceptTcpClient(Task<TcpClient> tcpClientTask, CancellationToken cancellationToken)
         {
             using (var session = new Session(logger, connectionId++, await tcpClientTask))
@@ -77,13 +81,17 @@ namespace SendKeyAgent.App
 
                     if (cancellationToken.IsCancellationRequested)
                     {
-                        TerminateSession("OK, Goodbye!", session);
+                        OnTerminateSession(session);
                         logger.LogDebug("Session while loop ends here. Reason: Cancellation Token requested");
                         //Session has been terminated exit loop.
                         break;
                     }
 
-                    ShowWelcomeText(WelcomeText, session);
+                    if(!session.IsWelcomeMessageShown)
+                    { 
+                        OnIntroNotShown(session);
+                        session.IsWelcomeMessageShown = true;
+                    }
 
                     if (session.HasDataAvailable)
                     {
@@ -103,7 +111,7 @@ namespace SendKeyAgent.App
                     }
                     else
                     {
-                        if(!IsSessionIsValid(session))
+                        if(!IsSessionValid(session))
                         {
                             break;
                         }
@@ -116,7 +124,147 @@ namespace SendKeyAgent.App
             logger.LogInformation("Session Completed");
         }
 
+        private int GetData(Stream stream)
+        {
+            var getBytes = stream.ReadByte();
 
+            stream.WriteByte(0);
+
+            return getBytes;
+        }
+
+        /// <summary>
+        /// Processes data from request
+        /// </summary>
+        /// <param name="session"></param>
+        /// <returns></returns>
+        protected virtual bool ProcessData(Session session)
+        {
+            logger.LogDebug("Receiving data...");
+            var data = GetData(session.DataStream);
+            if (data != -1)
+            {
+                if (data == Quit || data == EndOfTransmission)
+                {
+                    OnTerminateSession(session);
+                    FlushTextBuffer(session);
+                    logger.LogDebug("Quit has completed processing");
+                    return false;
+                }
+
+                if (data == EnterKey)
+                {
+                    var result = FlushTextBuffer(session);
+                    if (!session.SignedIn && !result.IsSuccessful)
+                    {
+                        return OnUnauthenticatedRequest(session, result);
+                    }
+                    else
+                    {
+                        OnAuthenticatedRequest(session, result);
+                    }
+
+                    if (result.Abort)
+                    {
+                        OnTerminateSession(session);
+                        session.Client.Close();
+                        logger.LogDebug("Quit has completed processing");
+                        //tcpListener.Stop();
+                        return false;
+                    }
+                }
+                else
+                {
+                    session.Data.Add((char)data);
+                }
+            }
+
+            return true;
+        }
+
+        private Result FlushTextBuffer(Session session)
+        {
+            bool isCommand = false;
+            var input = string.Join(string.Empty, session.Data.ToArray());
+
+            try
+            {
+                if (session.SignedIn)
+                {
+                    input = OnGetAuthenticatedCommandRequest(session, input, out isCommand);
+                }
+
+                // do not send empty character arrays to the input simulator it throws an argument null exception
+                if (!string.IsNullOrWhiteSpace(input))
+                {
+                    input = input.Trim();
+
+                    return OnRequestProcess(session, input, isCommand);
+                }
+            }
+            finally
+            {
+                session.Data.Clear();
+            }
+
+            return Result.Failed();
+        }
+        
+        protected void WriteText(Stream dataStream, string text, Encoding encoding)
+        {
+            var message = encoding.GetBytes(text);
+            dataStream.Write(message, 0, message.Length);
+        }
+        /// <summary>
+        /// Callback method triggered when an unauthenticated request has been processed.
+        /// </summary>
+        /// <param name="session"></param>
+        /// <param name="result"></param>
+        /// <returns></returns>
+        protected abstract bool OnUnauthenticatedRequest(Session session, Result result);
+
+        /// <summary>
+        /// Callback method triggered when an authenticated request has been processed.
+        /// </summary>
+        /// <param name="session"></param>
+        /// <param name="result"></param>
+        protected abstract void OnAuthenticatedRequest(Session session, Result result);
+
+        /// <summary>
+        /// Callback triggered when intro logic has not been fired for the first time when a client establishes a connection.
+        /// </summary>
+        /// <param name="session"></param>
+        protected abstract void OnIntroNotShown(Session session);
+
+        /// <summary>
+        /// Callback triggered when a session has been terminated.
+        /// </summary>
+        /// <param name="session"></param>
+        protected abstract void OnTerminateSession(Session session);
+
+        /// <summary>
+        /// Method to determine whether a session is currently valid.
+        /// </summary>
+        /// <param name="session"></param>
+        /// <returns></returns>
+        protected abstract bool IsSessionValid(Session session);
+        
+        /// <summary>
+        /// Obtains an executable command, if the command is invalid should return the original request.
+        /// </summary>
+        /// <param name="session"></param>
+        /// <param name="isCommand"></param>
+        /// <returns>Should return an executable command or the original value passed</returns>
+        protected abstract string OnGetAuthenticatedCommandRequest(Session session, string request, out bool isCommand);
+
+        /// <summary>
+        /// Processes an executable command computed by OnGetAuthenticatedCommandRequest or passed in the original request.
+        /// </summary>
+        /// <param name="session"></param>
+        /// <param name="request"></param>
+        /// <param name="isCommand"></param>
+        /// <returns></returns>
+        protected abstract Result OnRequestProcess(Session session, string request, bool isCommand);
         
         public void Dispose()
         {

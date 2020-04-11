@@ -40,6 +40,7 @@ namespace SendKeyAgent.App
         private const string getUserNamePrecursor = "$USER_NAME:GET";
         private const string namedPrompt = "${0}: ";
         private const string prompt = "$guest: ";
+        private const string tabularSeparator = "\t|\t";
         private static readonly string WelcomeText = 
             "\t======Send Key Agent======\t\r\n"
             + $"\t======Version { Assembly.GetEntryAssembly().GetName().Version }======\t\r\n"
@@ -119,6 +120,56 @@ namespace SendKeyAgent.App
 
             return string.Format(namedPrompt, session.UserName);
         }
+
+                private bool ProcessData(Session session)
+        {
+            logger.LogDebug("Receiving data...");
+            var data = GetData(session.DataStream);
+            if (data != -1)
+            {
+                if (data == Quit)
+                {
+                    TerminateSession("OK, Bye!", session);
+                    FlushTextBuffer(session);
+                    logger.LogDebug("Quit has completed processing");
+                    return false;
+                }
+
+                if (data == EnterKey)
+                {
+                    var result = FlushTextBuffer(session);
+                    if (!session.SignedIn && !result.IsSuccessful)
+                    {
+                        WriteText (
+                            session.DataStream,
+                            $"\r\n\r\nAccess Denied: You must be signed in to use this utility.\r\n\t" 
+                            + $"To sign in type {loginPrecursor}[password]\r\n{GetPrompt(session)} ",
+                            Encoding.ASCII);
+                        return true;
+                    }
+                    else
+                    {
+                        WriteText(session.DataStream, $"Message received.\r\n{GetPrompt(session)} ", Encoding.ASCII);
+                    }
+
+                    if (result.Abort)
+                    {
+                        TerminateSession("OK, Bye!", session);
+                        session.Client.Close();
+                        logger.LogDebug("Quit has completed processing");
+                        //tcpListener.Stop();
+                        return false;
+                    }
+                }
+                else
+                {
+                    session.Data.Add((char)data);
+                }
+            }
+
+            return true;
+        }
+
 
         private async Task AcceptTcpClient(Task<TcpClient> tcpClientTask, CancellationToken cancellationToken)
         {
@@ -227,54 +278,6 @@ namespace SendKeyAgent.App
 
         }
 
-        private bool ProcessData(Session session)
-        {
-            logger.LogDebug("Receiving data...");
-            var data = GetData(session.DataStream);
-            if (data != -1)
-            {
-                if (data == Quit)
-                {
-                    TerminateSession("OK, Bye!", session);
-                    FlushTextBuffer(session);
-                    logger.LogDebug("Quit has completed processing");
-                    return false;
-                }
-
-                if (data == EnterKey)
-                {
-                    var result = FlushTextBuffer(session);
-                    if (!session.SignedIn && !result.IsSuccessful)
-                    {
-                        WriteText (
-                            session.DataStream,
-                            $"\r\n\r\nAccess Denied: You must be signed in to use this utility.\r\n\t" 
-                            + $"To sign in type {loginPrecursor}[password]\r\n{GetPrompt(session)} ",
-                            Encoding.ASCII);
-                        return true;
-                    }
-                    else
-                    {
-                        WriteText(session.DataStream, $"Message received.\r\n{GetPrompt(session)} ", Encoding.ASCII);
-                    }
-
-                    if (result.Abort)
-                    {
-                        TerminateSession("OK, Bye!", session);
-                        session.Client.Close();
-                        logger.LogDebug("Quit has completed processing");
-                        //tcpListener.Stop();
-                        return false;
-                    }
-                }
-                else
-                {
-                    session.Data.Add((char)data);
-                }
-            }
-
-            return true;
-        }
 
         private void WriteText(Stream dataStream, string text, Encoding encoding)
         {
@@ -368,7 +371,7 @@ namespace SendKeyAgent.App
 
             return Result.Failed();
         }
-        private const string tabularSeparator = "\t|\t";
+        
         private Result ProcessWhenSignedIn(Session currentSession, string input, bool isCommand)
         {
             if(input == "who")
